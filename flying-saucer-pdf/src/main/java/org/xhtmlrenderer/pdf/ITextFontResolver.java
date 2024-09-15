@@ -39,6 +39,7 @@ import org.xhtmlrenderer.util.SupportedEmbeddedFontTypes;
 import org.xhtmlrenderer.util.XRLog;
 import org.xhtmlrenderer.util.XRRuntimeException;
 
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.io.File;
 import java.io.IOException;
@@ -199,7 +200,7 @@ public class ITextFontResolver implements FontResolver {
 
     public void addFont(String path, String encoding, boolean embedded)
             throws DocumentException, IOException {
-        addFont(path, encoding, embedded, null);
+        addFont(path, encoding, embedded, (String)null);
     }
 
     public void addFont(String path, String encoding, boolean embedded, String pathToPFB)
@@ -263,6 +264,87 @@ public class ITextFontResolver implements FontResolver {
         } else {
             throw new IOException("Unsupported font type: %s".formatted(path));
         }
+    }
+
+    public void addFont(@Nonnull String fontName,
+                        @Nonnull String fontEncoding,
+                        boolean embedded,
+                        @Nonnull byte[] fontData) throws IOException {
+        addFontFromMemory(fontName, fontEncoding, embedded, fontData, null, null);
+    }
+
+    public void addFont(@Nonnull String fontName,
+                        @Nonnull String fontEncoding,
+                        boolean embedded,
+                        @Nonnull byte[] fontData,
+                        @Nullable String fontFamilyNameOverride) throws IOException {
+        addFontFromMemory(fontName, fontEncoding, embedded, fontData, null, fontFamilyNameOverride);
+    }
+
+    public void addFont(@Nonnull String fontName,
+                        @Nonnull String fontEncoding,
+                        boolean embedded,
+                        @Nonnull byte[] fontData,
+                        @Nonnull byte[] pfbData) throws IOException {
+        addFontFromMemory(fontName, fontEncoding, embedded, fontData, pfbData, null);
+    }
+
+    public void addFont(@Nonnull String fontName,
+                        @Nonnull String fontEncoding,
+                        boolean embedded,
+                        @Nonnull byte[] fontData,
+                        @Nonnull byte[] pfbData,
+                        @Nullable String fontFamilyNameOverride) throws IOException {
+        addFontFromMemory(fontName, fontEncoding, embedded, fontData, pfbData, fontFamilyNameOverride);
+    }
+
+    private void addFontFromMemory(@Nonnull String fontName,
+                                   @Nonnull String fontEncoding,
+                                   boolean embedded,
+                                   @Nonnull byte[] fontData,
+                                   @Nullable byte[] pfbData,
+                                   @Nullable String fontFamilyNameOverride) throws IOException {
+
+        String lowerFontName = fontName.toLowerCase();
+
+        if (lowerFontName.endsWith(".ttc")) {
+            String[] names = BaseFont.enumerateTTCNames(fontData);
+            for (int i = 0; i < names.length; i++) {
+                addFontFromMemory(fontName + "," + i, fontEncoding, embedded,
+                    fontData, pfbData, fontFamilyNameOverride);
+            }
+            return;
+        }
+
+        if ((lowerFontName.endsWith(".afm") || lowerFontName.endsWith(".pfm")) && pfbData == null)
+            throw new IOException("PFB data must me specified for AFM and PFM fonts");
+
+        BaseFont baseFont = BaseFont.createFont(fontName, fontEncoding, embedded, false, fontData, pfbData);
+        boolean isOpenType = lowerFontName.endsWith(".ttf") || lowerFontName.endsWith(".otf") || lowerFontName.contains(".ttc,");
+
+        Collection<String> fontFamilyNames;
+        if (fontFamilyNameOverride != null) {
+            fontFamilyNames = Collections.singleton(fontFamilyNameOverride);
+        } else if (isOpenType) {
+            fontFamilyNames = TrueTypeUtil.getFamilyNames(baseFont);
+        } else {
+            fontFamilyNames = Collections.singleton(baseFont.getFamilyFontName()[0][3]);
+        }
+
+        FontDescription fontDescription = new FontDescription(baseFont);
+        if (isOpenType) {
+            try {
+                TrueTypeUtil.populateDescription(fontName, fontData, baseFont, fontDescription);
+            } catch (DocumentException | IOException | NoSuchFieldException | IllegalAccessException e) {
+                throw new XRRuntimeException(e.getMessage(), e);
+            }
+        }
+
+        for (String fontFamilyName : fontFamilyNames) {
+            FontFamily fontFamily = getFontFamily(fontFamilyName);
+            fontFamily.addFontDescription(fontDescription);
+        }
+
     }
 
     private boolean fontSupported(String uri) {
